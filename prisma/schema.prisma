@@ -1,0 +1,136 @@
+// Resonance — AI voice generation platform
+// Every organization-owned row carries `organizationId`; system rows use NULL.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// SYSTEM voices are global (organizationId = null) and readable by every org.
+/// CUSTOM voices belong to exactly one organization.
+enum VoiceVariant {
+  SYSTEM
+  CUSTOM
+}
+
+enum VoiceCategory {
+  AUDIOBOOK
+  CONVERSATIONAL
+  CUSTOMER_SERVICE
+  GENERAL
+  NARRATIVE
+  CHARACTERS
+  MEDITATION
+  MOTIVATIONAL
+  PODCAST
+  ADVERTISING
+  VOICE_OVER
+  CORPORATE
+}
+
+enum GenerationStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum UsageKind {
+  CHARACTERS
+  VOICE_CREATION
+}
+
+model Voice {
+  id String @id @default(cuid())
+
+  /// NULL for SYSTEM voices. Always derived from the Clerk session, never from the client.
+  organizationId String?
+
+  name        String
+  description String?
+  category    VoiceCategory @default(GENERAL)
+  language    String        @default("en-US")
+  variant     VoiceVariant  @default(CUSTOM)
+
+  /// Object key of the reference/source sample in S3-compatible storage.
+  r2ObjectKey String?
+
+  /// Clerk user id of the creator (custom voices only).
+  createdBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  generations Generation[]
+
+  @@index([variant])
+  @@index([organizationId])
+  @@index([organizationId, variant])
+  @@index([organizationId, createdAt(sort: Desc)])
+}
+
+model Generation {
+  id String @id @default(cuid())
+
+  organizationId String
+
+  /// Nullable so deleting a voice never destroys generation history.
+  voiceId String?
+
+  /// Snapshot of the voice name at generation time — survives voice deletion.
+  voiceName String
+
+  text        String
+  r2ObjectKey String?
+
+  // Chatterbox inference parameters, persisted so a generation is reproducible.
+  // Defaults mirror ChatterboxTurboTTS.generate().
+  temperature       Float @default(0.8)
+  topP              Float @default(0.95)
+  topK              Int   @default(1000)
+  repetitionPenalty Float @default(1.2)
+
+  status         GenerationStatus @default(PENDING)
+  errorMessage   String?
+  characterCount Int              @default(0)
+  durationSecs   Float?
+
+  /// Clerk user id of the requester.
+  createdBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  voice        Voice?        @relation(fields: [voiceId], references: [id], onDelete: SetNull)
+  usageRecords UsageRecord[]
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([organizationId, status])
+  @@index([voiceId])
+}
+
+/// Append-only usage ledger. Billing entitlement checks read from here so that
+/// usage survives a billing-provider outage and can be reconciled later.
+model UsageRecord {
+  id String @id @default(cuid())
+
+  organizationId String
+  kind           UsageKind
+  quantity       Int
+
+  generationId String?
+  voiceId      String?
+
+  /// Idempotency key for the upstream billing provider event.
+  externalEventId String? @unique
+
+  createdAt DateTime @default(now())
+
+  generation Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([organizationId, kind, createdAt])
+}
