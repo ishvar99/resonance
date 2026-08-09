@@ -1,0 +1,18 @@
+# Resonance Chatterbox inference service
+#
+# torch/torchaudio are pinned by chatterbox-tts itself (2.6.0 on Python < 3.14).
+# Install the CUDA build first in the Dockerfile so pip does not pull the CPU
+# wheel here.
+
+chatterbox-tts==0.1.7
+
+fastapi==0.121.2
+uvicorn[standard]==0.41.0
+pydantic==2.13.1
+httpx==0.28.1
+soundfile==0.13.1
+numpy<2.0.0
+
+# Optional: only needed when resolving `voice_key` straight from a bucket
+# instead of using the signed `voice_url` the Next.js server sends.
+boto3==1.42.6
