@@ -254,6 +254,43 @@ the server-side Zod schema and the tests, so they cannot drift.
 
 ---
 
+## Developer API
+
+Resonance exposes a REST API at `/api/v1`, authenticated with per-workspace API
+keys. Create keys in **Settings → API keys** (workspace admins only). The
+secret is shown once and stored as a SHA-256 hash.
+
+```bash
+# Discover voices — the ids are what text-to-speech accepts as voice_id
+curl https://your-app/api/v1/voices \
+  -H "Authorization: Bearer rsn_..."
+
+# Generate speech — returns audio/wav bytes
+curl https://your-app/api/v1/text-to-speech \
+  -H "Authorization: Bearer rsn_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello from the Resonance API.",
+    "voice_id": "system_aaron",
+    "temperature": 0.8,
+    "top_p": 0.95,
+    "top_k": 1000,
+    "repetition_penalty": 1.2
+  }' \
+  --output speech.wav
+```
+
+Success responses carry `X-Generation-Id` and `X-Characters-Billed` headers,
+and the generation appears in the workspace's history like any dashboard one.
+Errors are JSON `{ "error": { "code", "message" } }`: `401` invalid key,
+`400` validation, `404` unknown or foreign voice, `402` out of entitlement,
+`429` rate limited. Validation errors add a `details` map keyed by the field
+you sent (`top_p`, `text`, …) with per-field messages.
+
+API traffic runs the exact same pipeline as the dashboard — same rate-limit
+bucket, same tenant checks, same billing gate — via a single shared service
+(`performSpeechGeneration`), so the two surfaces cannot drift.
+
 ## Scripts
 
 | Command | Purpose |

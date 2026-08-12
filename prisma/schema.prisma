@@ -112,6 +112,40 @@ model Generation {
   @@index([voiceId])
 }
 
+/// Per-organization API key for the public REST API (/api/v1).
+///
+/// The secret is shown once at creation and only its SHA-256 hash is stored —
+/// a database leak must not leak usable credentials. `prefix` and `last4` exist
+/// purely so the UI can identify a key without revealing it. Revocation is a
+/// soft delete so the audit trail (who created what, when it was last used)
+/// survives the key itself.
+model ApiKey {
+  id String @id @default(cuid())
+
+  organizationId String
+
+  /// Human label ("CI pipeline", "staging server").
+  name String
+
+  /// SHA-256 hex digest of the full secret. Lookups happen on this column.
+  keyHash String @unique
+
+  /// First characters of the secret (e.g. "rsn_3f9a2b1c") for display.
+  prefix String
+  last4  String
+
+  /// Clerk user id of the creator.
+  createdBy String?
+
+  /// Updated at most once a minute to avoid write amplification per request.
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, createdAt(sort: Desc)])
+}
+
 /// Append-only usage ledger. Billing entitlement checks read from here so that
 /// usage survives a billing-provider outage and can be reconciled later.
 model UsageRecord {
