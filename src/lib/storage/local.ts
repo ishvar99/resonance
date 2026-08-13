@@ -1,5 +1,5 @@
-import "server-only";
-
+// No `server-only` here — see the note in ./r2.ts; the guard lives on the
+// `@/lib/storage` barrel that application code imports.
 import { createReadStream } from "node:fs";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";

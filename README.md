@@ -354,13 +354,26 @@ Set `APP_URL` to the public origin — checkout return URLs are built from it.
 
 ---
 
-## Known limitations
+## System voice audio
 
-- **System voices ship without reference audio.** The Chatterbox samples are not
-  redistributable, so `npm run db:seed` creates the voices with
-  `r2ObjectKey = null`. Preview is disabled for them in the UI and generation
-  falls back to Chatterbox's built-in default voice. To enable them, upload a
-  WAV to `system/voices/{voiceId}/source.wav` and set `r2ObjectKey`.
+Real recordings are not in the repository (the Chatterbox samples are not
+redistributable), so system voice audio is managed operationally:
+
+- **Development:** `npm run db:seed` attaches clearly-marked placeholder
+  fixtures — deterministic generated tones, one distinct melody per voice — to
+  any system voice without a sample, so preview and the full audio pipeline
+  work with zero external assets. `npm run voices:fixtures` re-runs just that
+  step (`-- --force` regenerates all of them).
+- **Production:** fixtures are refused. Attach licensed recordings with
+  `npm run voices:attach -- ./samples`, where filenames match voices by slug
+  or id (`aaron.wav` or `system_aaron.wav` → `system_aaron`). Matched voices
+  are overwritten; unsupported files are skipped and reported.
+
+Don't point a real Chatterbox deployment at fixture audio: the model
+conditions on the reference sample, and a tone is not a voice. Fixtures exist
+for the UI and pipeline, not for cloning.
+
+## Known limitations
 - **Rate limiting is per process.** Correct for a single instance; use a shared
   store behind multiple replicas.
 - **Generation is synchronous.** Long scripts are bounded by
