@@ -254,6 +254,18 @@ the server-side Zod schema and the tests, so they cannot drift.
 
 ---
 
+## Team
+
+`/team` shows who is in the workspace and what they have generated. Member
+management itself — invitations, role changes, removal, leaving — is Clerk's
+embedded `OrganizationProfile`, so permission rules and invitation emails come
+from the identity provider rather than a hand-rolled clone of it.
+
+The activity table attributes generations per member from the `createdBy`
+column; API-key traffic appears as a single workspace-level row (keys are
+workspace credentials, not people), and usage by people who have since left
+the workspace stays visible as "former member" rather than evaporating.
+
 ## Developer API
 
 Resonance exposes a REST API at `/api/v1`, authenticated with per-workspace API
