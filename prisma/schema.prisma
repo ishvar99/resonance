@@ -33,7 +33,10 @@ enum VoiceCategory {
 }
 
 enum GenerationStatus {
+  /** Queued — waiting for the inline fast-path or a worker to claim it. */
   PENDING
+  /** Claimed by a worker and currently generating. */
+  PROCESSING
   COMPLETED
   FAILED
 }
@@ -98,6 +101,15 @@ model Generation {
   characterCount Int              @default(0)
   durationSecs   Float?
 
+  // --- queue bookkeeping (the Generation row IS the job) -------------------
+  /// Delivery attempts so far. Retries stop at the worker's max.
+  attempts Int @default(0)
+  /// Not claimable before this instant — powers retry backoff.
+  availableAt DateTime @default(now())
+  /// Set while PROCESSING; lets the reaper recover rows from crashed workers.
+  claimedAt DateTime?
+  claimedBy String?
+
   /// Clerk user id of the requester.
   createdBy String?
 
@@ -110,6 +122,7 @@ model Generation {
   @@index([organizationId, createdAt(sort: Desc)])
   @@index([organizationId, status])
   @@index([voiceId])
+  @@index([status, availableAt])
 }
 
 /// Per-organization API key for the public REST API (/api/v1).

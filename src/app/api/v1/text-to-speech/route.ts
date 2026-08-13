@@ -49,6 +49,27 @@ export async function POST(request: Request) {
       source: "api",
     });
 
+    // Long texts are queued for the worker: 202 with where to poll, rather
+    // than holding the connection open for minutes of GPU time.
+    if (outcome.status === "queued") {
+      return Response.json(
+        {
+          generation_id: outcome.generationId,
+          status: "queued",
+          characters_billed: outcome.characterCount,
+          poll_url: `/api/v1/generations/${outcome.generationId}`,
+          audio_url: `/api/v1/generations/${outcome.generationId}/audio`,
+        },
+        {
+          status: 202,
+          headers: {
+            "X-Generation-Id": outcome.generationId,
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
     return new Response(new Uint8Array(outcome.audio.audio), {
       status: 200,
       headers: {

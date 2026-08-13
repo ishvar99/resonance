@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readWavInfo } from "@/lib/audio/wav";
 import { createStorageFromEnv } from "@/lib/storage/factory";
@@ -81,14 +81,14 @@ describe("sample filename matching", () => {
 });
 
 describe("fixture production guard", () => {
-  const originalNodeEnv = process.env.NODE_ENV;
-
   afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv;
+    vi.unstubAllEnvs();
   });
 
   it("refuses to attach placeholder audio in production", async () => {
-    process.env.NODE_ENV = "production";
+    // `process.env.NODE_ENV` is typed read-only; stubEnv mutates and restores
+    // it the supported way.
+    vi.stubEnv("NODE_ENV", "production");
 
     // The guard must fire before anything touches the database or storage —
     // both are poison stubs that fail the test if reached.

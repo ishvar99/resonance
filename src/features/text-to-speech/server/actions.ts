@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { currentUser } from "@clerk/nextjs/server";
 
 import { performSpeechGeneration } from "@/features/text-to-speech/server/generate";
@@ -20,6 +21,8 @@ export type GenerateSpeechResult = {
   generationId: string;
   /** True when development preview audio was returned instead of real speech. */
   preview: boolean;
+  /** True when the text was queued for the worker; the result page polls. */
+  queued: boolean;
 };
 
 /**
@@ -54,9 +57,15 @@ export async function generateSpeechAction(
       source: "dashboard",
     });
 
+    // The pipeline itself is request-context-free (the worker runs it too),
+    // so cache invalidation lives here at the action layer.
+    revalidatePath("/history");
+    revalidatePath("/");
+
     return actionSuccess({
       generationId: outcome.generationId,
-      preview: outcome.preview,
+      preview: outcome.status === "completed" ? outcome.preview : false,
+      queued: outcome.status === "queued",
     });
   } catch (error) {
     captureException(error, {

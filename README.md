@@ -280,6 +280,8 @@ curl https://your-app/api/v1/text-to-speech \
   --output speech.wav
 ```
 
+Texts over the deployment's inline threshold return `202` with `poll_url` and
+`audio_url` instead of audio bytes (see Generation queue below).
 Success responses carry `X-Generation-Id` and `X-Characters-Billed` headers,
 and the generation appears in the workspace's history like any dashboard one.
 Errors are JSON `{ "error": { "code", "message" } }`: `401` invalid key,
@@ -373,8 +375,32 @@ Don't point a real Chatterbox deployment at fixture audio: the model
 conditions on the reference sample, and a tone is not a voice. Fixtures exist
 for the UI and pipeline, not for cloning.
 
+## Generation queue
+
+Generation runs in two modes around one shared pipeline:
+
+- **Inline (default):** texts at or under `GENERATION_INLINE_MAX_CHARS`
+  (default 5000 — i.e. everything) generate synchronously in the request, as
+  before. No worker required.
+- **Queued:** lower the threshold once a worker is deployed and longer texts
+  return immediately; the result page polls until the audio lands, and API
+  callers get a `202` with `poll_url` / `audio_url` instead of audio bytes.
+
+The queue is Postgres itself — the `Generation` row is the job, claimed with
+`FOR UPDATE SKIP LOCKED`, so any number of workers can run without contention
+and without adding Redis to the stack.
+
+```bash
+npm run worker
+```
+
+Deploy it as a second process/service sharing the web app's environment
+(Railway-style). Failed jobs retry with exponential backoff (30s → 60s → 120s,
+3 attempts); jobs orphaned by a crashed worker are requeued by a stale-claim
+reaper after 10 minutes, or failed honestly once their attempts are spent.
+Billing entitlement is checked at enqueue time, so a queued job never turns
+into a surprise charge gate, and usage is recorded only on completion.
+
 ## Known limitations
 - **Rate limiting is per process.** Correct for a single instance; use a shared
   store behind multiple replicas.
-- **Generation is synchronous.** Long scripts are bounded by
-  `CHATTERBOX_TIMEOUT_MS`. A job queue would be the next step for longer work.

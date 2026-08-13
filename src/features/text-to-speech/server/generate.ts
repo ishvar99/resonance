@@ -1,40 +1,32 @@
 import "server-only";
 
-import { revalidatePath } from "next/cache";
-
+import {
+  failGeneration,
+  processClaimedGeneration,
+} from "@/features/text-to-speech/server/pipeline";
 import { findAccessibleVoice } from "@/features/voices/data/queries";
 import { getBillingProvider } from "@/lib/billing";
 import { requireEntitlement } from "@/lib/billing/checkout";
-import { getSpeechGenerator, type GeneratedAudio } from "@/lib/chatterbox";
+import type { GeneratedAudio } from "@/lib/chatterbox";
 import { database } from "@/lib/database";
-import {
-  BillingRequiredError,
-  GenerationError,
-  NotFoundError,
-  isApplicationError,
-} from "@/lib/errors";
-import { captureException } from "@/lib/observability";
+import { env } from "@/lib/environment";
+import { BillingRequiredError, NotFoundError } from "@/lib/errors";
 import { RATE_LIMITS, consumeRateLimit } from "@/lib/rate-limit";
-import { generationAudioKey, getStorage } from "@/lib/storage";
 
 /**
- * The one generation pipeline, shared by the dashboard (server action) and the
- * public REST API (/api/v1/text-to-speech). There must never be two copies of
- * this flow — the billing gate and the tenant checks live here or nowhere.
+ * Entry point shared by the dashboard action and the public REST API.
  *
- * Callers are responsible for AUTHENTICATION (who is asking) and for input
- * validation; this function is responsible for everything after:
+ * The flow is split in two around the queue:
  *
- *  1. rate limit per organization — shared across entry points, so an API
- *     client and the dashboard draw from the same GPU budget,
- *  2. voice ownership: SYSTEM voices for everyone, CUSTOM only for the owner —
- *     a foreign voice is indistinguishable from a nonexistent one,
- *  3. billing entitlement BEFORE any GPU work,
- *  4. persist a PENDING row so a crash mid-flight stays visible in history,
- *  5. call Chatterbox, store the audio, mark COMPLETED,
- *  6. record usage only after the work actually succeeded.
+ *   enqueue (here, in the request)    — rate limit, voice ownership, billing
+ *                                       entitlement, persist the PENDING row.
+ *   process (pipeline.ts, anywhere)   — Chatterbox, storage, COMPLETED, usage.
  *
- * A failure after step 4 marks the row FAILED rather than deleting it.
+ * Texts at or under GENERATION_INLINE_MAX_CHARS are processed inline so the
+ * common case stays a single snappy request. Longer texts return immediately
+ * as `queued`; the worker (`npm run worker`) claims and processes them, and
+ * the result page polls until the row settles. With the default threshold
+ * (= the request maximum) everything runs inline and no worker is required.
  */
 export type SpeechGenerationRequest = {
   organizationId: string;
@@ -58,13 +50,20 @@ export type SpeechGenerationRequest = {
   source: "dashboard" | "api";
 };
 
-export type SpeechGenerationOutcome = {
-  generationId: string;
-  audio: GeneratedAudio;
-  /** True when the development adapter produced placeholder audio. */
-  preview: boolean;
-  characterCount: number;
-};
+export type SpeechGenerationOutcome =
+  | {
+      status: "completed";
+      generationId: string;
+      audio: GeneratedAudio;
+      /** True when the development adapter produced placeholder audio. */
+      preview: boolean;
+      characterCount: number;
+    }
+  | {
+      status: "queued";
+      generationId: string;
+      characterCount: number;
+    };
 
 export async function performSpeechGeneration(
   request: SpeechGenerationRequest,
@@ -105,7 +104,7 @@ export async function performSpeechGeneration(
     }
   }
 
-  const generation = await database.generation.create({
+  const created = await database.generation.create({
     data: {
       organizationId,
       voiceId: voice.id,
@@ -121,89 +120,43 @@ export async function performSpeechGeneration(
     },
   });
 
+  if (characterCount > env.GENERATION_INLINE_MAX_CHARS) {
+    // The worker takes it from here. Entitlement was checked above, so a
+    // queued job never turns into a surprise bill gate later.
+    return { status: "queued", generationId: created.id, characterCount };
+  }
+
+  // Inline fast-path: claim the row we just created, conditionally on it
+  // still being PENDING — a polling worker may have grabbed it in the
+  // intervening milliseconds. Losing that race is fine: whoever claimed it
+  // will finish it, so we just report it as queued and the result page polls.
+  const { count } = await database.generation.updateMany({
+    where: { id: created.id, status: "PENDING" },
+    data: {
+      status: "PROCESSING",
+      claimedAt: new Date(),
+      claimedBy: "inline",
+      attempts: 1,
+    },
+  });
+
+  if (count === 0) {
+    return { status: "queued", generationId: created.id, characterCount };
+  }
+
   try {
-    // Hand the GPU service a short-lived URL rather than bucket credentials.
-    const voiceUrl = voice.r2ObjectKey
-      ? await getStorage()
-          .createSignedDownloadUrl(voice.r2ObjectKey, 600)
-          .catch(() => null)
-      : null;
-
-    const audio = await getSpeechGenerator().generate({
-      text: request.text,
-      voiceKey: voice.r2ObjectKey,
-      voiceUrl,
-      temperature: request.temperature,
-      topP: request.topP,
-      topK: request.topK,
-      repetitionPenalty: request.repetitionPenalty,
-      requestId: generation.id,
-    });
-
-    const key = generationAudioKey(organizationId, generation.id);
-    await getStorage().put({
-      key,
-      body: audio.audio,
-      contentType: audio.contentType,
-      metadata: { organizationId, generationId: generation.id },
-    });
-
-    await database.generation.update({
-      where: { id: generation.id },
-      data: {
-        r2ObjectKey: key,
-        status: "COMPLETED",
-        durationSecs: audio.durationSeconds,
-      },
-    });
-
-    await getBillingProvider().recordUsage({
-      organizationId,
-      meter: "CHARACTERS",
-      quantity: characterCount,
-      generationId: generation.id,
-      idempotencyKey: `generation:${generation.id}`,
-    });
-
-    revalidatePath("/history");
-    revalidatePath("/");
-
+    const audio = await processClaimedGeneration(created);
     return {
-      generationId: generation.id,
+      status: "completed",
+      generationId: created.id,
       audio,
       preview: audio.provider === "mock",
       characterCount,
     };
   } catch (error) {
-    await markGenerationFailed(generation.id, error);
+    // Inline failures surface immediately — the user is watching a spinner,
+    // not waiting on a queue, so no retry-with-backoff here.
+    await failGeneration(created.id, error);
     throw error;
   }
-}
-
-/**
- * Records why a generation failed. Only `ApplicationError` messages — which are
- * written to be user-facing — are persisted; anything else gets a generic
- * message so an upstream stack trace never lands in the UI.
- */
-async function markGenerationFailed(
-  generationId: string,
-  error: unknown,
-): Promise<void> {
-  const errorMessage = isApplicationError(error)
-    ? error.message
-    : new GenerationError().message;
-
-  await database.generation
-    .update({
-      where: { id: generationId },
-      data: { status: "FAILED", errorMessage },
-    })
-    .catch((cause) => {
-      captureException(cause, {
-        tags: { area: "text-to-speech", operation: "mark-failed" },
-        extra: { generationId },
-      });
-    });
-
-  revalidatePath("/history");
 }

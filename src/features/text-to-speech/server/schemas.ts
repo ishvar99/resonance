@@ -49,7 +49,7 @@ export type GenerateSpeechInput = z.input<typeof generateSpeechSchema>;
 
 export const historyQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
-  status: z.enum(["PENDING", "COMPLETED", "FAILED"]).optional(),
+  status: z.enum(["PENDING", "PROCESSING", "COMPLETED", "FAILED"]).optional(),
   search: z.string().trim().max(100).optional(),
 });
 

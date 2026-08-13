@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertCircle, ChevronRight, Clock, Download } from "lucide-react";
+import { AlertCircle, ChevronRight, Clock, Download, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,16 @@ function StatusBadge({ generation }: { generation: GenerationSummary }) {
     return (
       <Badge variant="secondary" className="gap-1 text-[11px] font-normal">
         <Clock className="size-3" aria-hidden="true" />
-        Pending
+        Queued
+      </Badge>
+    );
+  }
+
+  if (generation.status === "PROCESSING") {
+    return (
+      <Badge variant="secondary" className="gap-1 text-[11px] font-normal">
+        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+        Generating
       </Badge>
     );
   }
