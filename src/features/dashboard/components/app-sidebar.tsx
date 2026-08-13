@@ -10,6 +10,7 @@ import {
   Mic,
   Settings,
   Sparkles,
+  Users,
   Waves,
 } from "lucide-react";
 
@@ -42,6 +43,7 @@ const WORKSPACE_LINKS: NavigationItem[] = [
   { title: "Text to Speech", href: "/text-to-speech", icon: AudioLines, matchNested: true },
   { title: "Voices", href: "/voices", icon: Sparkles, matchNested: true },
   { title: "History", href: "/history", icon: History, matchNested: true },
+  { title: "Team", href: "/team", icon: Users, matchNested: true },
 ];
 
 const STUDIO_LINKS: NavigationItem[] = [
