@@ -49,6 +49,45 @@ export type GenerateSpeechInput = z.input<typeof generateSpeechSchema>;
 
 export const historyQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
-  status: z.enum(["PENDING", "COMPLETED", "FAILED"]).optional(),
+  status: z.enum(["PENDING", "PROCESSING", "COMPLETED", "FAILED"]).optional(),
   search: z.string().trim().max(100).optional(),
 });
+
+/**
+ * Public REST API contract (/api/v1/text-to-speech).
+ *
+ * snake_case on the wire — the convention of every major model API — mapped
+ * here onto the same internal shape and the same bounds as the dashboard.
+ * Unknown fields are stripped, so a smuggled `organization_id` never survives
+ * parsing; tenant identity comes exclusively from the API key.
+ */
+export const publicGenerateSchema = z
+  .object({
+    text: z
+      .string()
+      .trim()
+      .min(1, "`text` must not be empty.")
+      .max(
+        MAX_GENERATION_CHARACTERS,
+        `\`text\` is limited to ${MAX_GENERATION_CHARACTERS} characters per request.`,
+      ),
+    voice_id: z.string().min(1, "`voice_id` is required."),
+    temperature: parameter("temperature").default(
+      GENERATION_PARAMETERS.temperature.default,
+    ),
+    top_p: parameter("topP").default(GENERATION_PARAMETERS.topP.default),
+    top_k: parameter("topK").int().default(GENERATION_PARAMETERS.topK.default),
+    repetition_penalty: parameter("repetitionPenalty").default(
+      GENERATION_PARAMETERS.repetitionPenalty.default,
+    ),
+  })
+  .transform((value) => ({
+    text: value.text,
+    voiceId: value.voice_id,
+    temperature: value.temperature,
+    topP: value.top_p,
+    topK: value.top_k,
+    repetitionPenalty: value.repetition_penalty,
+  }));
+
+export type PublicGenerateInput = z.output<typeof publicGenerateSchema>;

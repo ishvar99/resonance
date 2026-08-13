@@ -4,12 +4,12 @@
  * System voices have `organizationId = null` and `variant = SYSTEM`, which makes
  * them readable by every workspace (see `accessibleVoiceFilter`).
  *
- * Reference audio is NOT seeded — the Chatterbox samples are not redistributable
- * and would be several MB of binary in the repository. Voices are created with
- * `r2ObjectKey = null`; the UI reads `hasSample` and disables preview, and
- * generation falls back to Chatterbox's built-in default voice. To attach real
- * samples, upload each WAV to `system/voices/{voiceId}/source.wav` and set
- * `r2ObjectKey` accordingly.
+ * Real reference audio is NOT in the repository — the Chatterbox samples are
+ * not redistributable. Outside production, seeding finishes by attaching
+ * clearly-marked placeholder fixtures (generated tones) to any system voice
+ * without a sample, so preview and the audio pipeline work immediately. Attach
+ * licensed recordings with `npm run voices:attach -- <dir>`; in production
+ * that is the only path, since fixtures are refused there.
  *
  * Run with: npm run db:seed
  */
@@ -19,6 +19,10 @@ import "dotenv/config";
 
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { VoiceCategory } from "../src/generated/prisma/enums";
+import {
+  attachFixtureSamples,
+  createStorageForScripts,
+} from "../scripts/voice-sample-lib";
 
 type SystemVoiceSeed = {
   slug: string;
@@ -138,9 +142,29 @@ async function main() {
   console.info(
     `Done — ${created} voice(s) created, ${updated} updated, ${SYSTEM_VOICES.length} total.`,
   );
-  console.info(
-    "System voices have no reference sample. Preview is disabled until you upload one to system/voices/{id}/source.wav and set r2ObjectKey.",
-  );
+
+  if (process.env.NODE_ENV === "production") {
+    console.info(
+      "Production: no placeholder audio attached. Add licensed recordings with `npm run voices:attach -- <dir>`.",
+    );
+    return;
+  }
+
+  // Development nicety, never a seed failure: rows are the contract, audio is
+  // best-effort.
+  try {
+    const summary = await attachFixtureSamples(prisma, createStorageForScripts());
+    console.info(
+      summary.attached.length > 0
+        ? `Attached placeholder preview audio to ${summary.attached.length} voice(s) — generated tones, clearly not recordings.`
+        : "All system voices already have samples; placeholders untouched.",
+    );
+  } catch (error) {
+    console.warn(
+      "Could not attach placeholder audio (storage unavailable?). Voices exist; previews stay disabled:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 main()

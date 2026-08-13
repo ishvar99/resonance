@@ -17,8 +17,18 @@ import { NextResponse } from "next/server";
  * protected resource reachable. Nothing here is load-bearing for access control.
  */
 
-/** Reachable without a session at all. */
-const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/api/webhooks", "/monitoring"];
+/**
+ * Reachable without a Clerk session. /api/v1 is the public REST API — it
+ * performs its own authentication with per-organization API keys, and a Clerk
+ * redirect would break server-to-server callers.
+ */
+const PUBLIC_PREFIXES = [
+  "/sign-in",
+  "/sign-up",
+  "/api/webhooks",
+  "/api/v1",
+  "/monitoring",
+];
 
 /** Requires a session, but not an active organization. */
 const ORGANIZATION_AGNOSTIC_PREFIXES = ["/organization-selection"];

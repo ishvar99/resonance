@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WaveformPlayer } from "@/features/audio/components/waveform-player";
 import { PageHeader } from "@/features/dashboard/components/page-header";
+import { GenerationStatusPoller } from "@/features/text-to-speech/components/generation-status-poller";
 import { RegenerateButton } from "@/features/text-to-speech/components/regenerate-button";
 import {
   findGeneration,
@@ -67,14 +68,23 @@ export default async function GenerationPage({
           </Alert>
         ) : null}
 
-        {generation.status === "PENDING" ? (
-          <Alert>
-            <Clock aria-hidden="true" />
-            <AlertTitle>Still generating</AlertTitle>
-            <AlertDescription>
-              This generation has not finished yet. Refresh in a moment.
-            </AlertDescription>
-          </Alert>
+        {generation.status === "PENDING" || generation.status === "PROCESSING" ? (
+          <>
+            <GenerationStatusPoller />
+            <Alert>
+              <Clock aria-hidden="true" />
+              <AlertTitle>
+                {generation.status === "PENDING"
+                  ? "Waiting in the queue"
+                  : "Generating…"}
+              </AlertTitle>
+              <AlertDescription>
+                {generation.status === "PENDING"
+                  ? "A worker will pick this up shortly. This page updates by itself."
+                  : "The voice engine is working on it. This page updates by itself."}
+              </AlertDescription>
+            </Alert>
+          </>
         ) : null}
 
         {generation.hasAudio ? (

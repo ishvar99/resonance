@@ -37,6 +37,13 @@ export const env = createEnv({
     CHATTERBOX_API_URL: optionalString.pipe(z.string().url().optional()),
     CHATTERBOX_API_KEY: optionalString,
     CHATTERBOX_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
+    /**
+     * Texts at or under this length generate synchronously in the request;
+     * longer ones are queued for the worker (`npm run worker`). The default
+     * keeps everything inline, so deployments without a worker lose nothing —
+     * lower it only once a worker process is actually running.
+     */
+    GENERATION_INLINE_MAX_CHARS: z.coerce.number().int().positive().default(5_000),
 
     // --- Cloudflare R2 / S3-compatible object storage -----------------------
     R2_ACCOUNT_ID: optionalString,
@@ -88,6 +95,7 @@ export const env = createEnv({
     CHATTERBOX_API_URL: process.env.CHATTERBOX_API_URL,
     CHATTERBOX_API_KEY: process.env.CHATTERBOX_API_KEY,
     CHATTERBOX_TIMEOUT_MS: process.env.CHATTERBOX_TIMEOUT_MS,
+    GENERATION_INLINE_MAX_CHARS: process.env.GENERATION_INLINE_MAX_CHARS,
 
     R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
     R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,

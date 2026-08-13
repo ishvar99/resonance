@@ -33,7 +33,10 @@ enum VoiceCategory {
 }
 
 enum GenerationStatus {
+  /** Queued — waiting for the inline fast-path or a worker to claim it. */
   PENDING
+  /** Claimed by a worker and currently generating. */
+  PROCESSING
   COMPLETED
   FAILED
 }
@@ -98,6 +101,15 @@ model Generation {
   characterCount Int              @default(0)
   durationSecs   Float?
 
+  // --- queue bookkeeping (the Generation row IS the job) -------------------
+  /// Delivery attempts so far. Retries stop at the worker's max.
+  attempts Int @default(0)
+  /// Not claimable before this instant — powers retry backoff.
+  availableAt DateTime @default(now())
+  /// Set while PROCESSING; lets the reaper recover rows from crashed workers.
+  claimedAt DateTime?
+  claimedBy String?
+
   /// Clerk user id of the requester.
   createdBy String?
 
@@ -110,6 +122,41 @@ model Generation {
   @@index([organizationId, createdAt(sort: Desc)])
   @@index([organizationId, status])
   @@index([voiceId])
+  @@index([status, availableAt])
+}
+
+/// Per-organization API key for the public REST API (/api/v1).
+///
+/// The secret is shown once at creation and only its SHA-256 hash is stored —
+/// a database leak must not leak usable credentials. `prefix` and `last4` exist
+/// purely so the UI can identify a key without revealing it. Revocation is a
+/// soft delete so the audit trail (who created what, when it was last used)
+/// survives the key itself.
+model ApiKey {
+  id String @id @default(cuid())
+
+  organizationId String
+
+  /// Human label ("CI pipeline", "staging server").
+  name String
+
+  /// SHA-256 hex digest of the full secret. Lookups happen on this column.
+  keyHash String @unique
+
+  /// First characters of the secret (e.g. "rsn_3f9a2b1c") for display.
+  prefix String
+  last4  String
+
+  /// Clerk user id of the creator.
+  createdBy String?
+
+  /// Updated at most once a minute to avoid write amplification per request.
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, createdAt(sort: Desc)])
 }
 
 /// Append-only usage ledger. Billing entitlement checks read from here so that

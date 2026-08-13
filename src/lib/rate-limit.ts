@@ -24,10 +24,12 @@ export type RateLimitRule = {
 };
 
 export const RATE_LIMITS = {
-  /** GPU inference is the expensive one. */
+  /** GPU inference is the expensive one — shared by dashboard and public API. */
   generateSpeech: { limit: 20, windowMs: 60_000 },
   createVoice: { limit: 10, windowMs: 60_000 },
   audioStream: { limit: 240, windowMs: 60_000 },
+  /** Cheap public-API reads (voice discovery). */
+  publicApiRead: { limit: 120, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export function consumeRateLimit(

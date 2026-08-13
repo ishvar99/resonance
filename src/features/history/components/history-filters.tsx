@@ -95,7 +95,8 @@ export function HistoryFilters() {
         <SelectContent>
           <SelectItem value={ALL}>All statuses</SelectItem>
           <SelectItem value="COMPLETED">Completed</SelectItem>
-          <SelectItem value="PENDING">Pending</SelectItem>
+          <SelectItem value="PENDING">Queued</SelectItem>
+          <SelectItem value="PROCESSING">Generating</SelectItem>
           <SelectItem value="FAILED">Failed</SelectItem>
         </SelectContent>
       </Select>

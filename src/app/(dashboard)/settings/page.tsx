@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ApiKeysSection } from "@/features/api-keys/components/api-keys-section";
 import {
   ManageBillingButton,
   UpgradeButton,
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
 export default async function SettingsPage({
   searchParams,
 }: PageProps<"/settings">) {
-  const { organizationId } = await requireAuthContext();
+  const { organizationId, organizationRole } = await requireAuthContext();
   const params = await searchParams;
 
   const billing = getBillingProvider();
@@ -142,6 +143,11 @@ export default async function SettingsPage({
             </dl>
           </CardContent>
         </Card>
+
+        <ApiKeysSection
+          organizationId={organizationId}
+          isAdmin={organizationRole === "org:admin"}
+        />
 
         <Card>
           <CardHeader>

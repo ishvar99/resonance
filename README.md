@@ -254,6 +254,45 @@ the server-side Zod schema and the tests, so they cannot drift.
 
 ---
 
+## Developer API
+
+Resonance exposes a REST API at `/api/v1`, authenticated with per-workspace API
+keys. Create keys in **Settings → API keys** (workspace admins only). The
+secret is shown once and stored as a SHA-256 hash.
+
+```bash
+# Discover voices — the ids are what text-to-speech accepts as voice_id
+curl https://your-app/api/v1/voices \
+  -H "Authorization: Bearer rsn_..."
+
+# Generate speech — returns audio/wav bytes
+curl https://your-app/api/v1/text-to-speech \
+  -H "Authorization: Bearer rsn_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello from the Resonance API.",
+    "voice_id": "system_aaron",
+    "temperature": 0.8,
+    "top_p": 0.95,
+    "top_k": 1000,
+    "repetition_penalty": 1.2
+  }' \
+  --output speech.wav
+```
+
+Texts over the deployment's inline threshold return `202` with `poll_url` and
+`audio_url` instead of audio bytes (see Generation queue below).
+Success responses carry `X-Generation-Id` and `X-Characters-Billed` headers,
+and the generation appears in the workspace's history like any dashboard one.
+Errors are JSON `{ "error": { "code", "message" } }`: `401` invalid key,
+`400` validation, `404` unknown or foreign voice, `402` out of entitlement,
+`429` rate limited. Validation errors add a `details` map keyed by the field
+you sent (`top_p`, `text`, …) with per-field messages.
+
+API traffic runs the exact same pipeline as the dashboard — same rate-limit
+bucket, same tenant checks, same billing gate — via a single shared service
+(`performSpeechGeneration`), so the two surfaces cannot drift.
+
 ## Scripts
 
 | Command | Purpose |
@@ -317,14 +356,51 @@ Set `APP_URL` to the public origin — checkout return URLs are built from it.
 
 ---
 
-## Known limitations
+## System voice audio
 
-- **System voices ship without reference audio.** The Chatterbox samples are not
-  redistributable, so `npm run db:seed` creates the voices with
-  `r2ObjectKey = null`. Preview is disabled for them in the UI and generation
-  falls back to Chatterbox's built-in default voice. To enable them, upload a
-  WAV to `system/voices/{voiceId}/source.wav` and set `r2ObjectKey`.
+Real recordings are not in the repository (the Chatterbox samples are not
+redistributable), so system voice audio is managed operationally:
+
+- **Development:** `npm run db:seed` attaches clearly-marked placeholder
+  fixtures — deterministic generated tones, one distinct melody per voice — to
+  any system voice without a sample, so preview and the full audio pipeline
+  work with zero external assets. `npm run voices:fixtures` re-runs just that
+  step (`-- --force` regenerates all of them).
+- **Production:** fixtures are refused. Attach licensed recordings with
+  `npm run voices:attach -- ./samples`, where filenames match voices by slug
+  or id (`aaron.wav` or `system_aaron.wav` → `system_aaron`). Matched voices
+  are overwritten; unsupported files are skipped and reported.
+
+Don't point a real Chatterbox deployment at fixture audio: the model
+conditions on the reference sample, and a tone is not a voice. Fixtures exist
+for the UI and pipeline, not for cloning.
+
+## Generation queue
+
+Generation runs in two modes around one shared pipeline:
+
+- **Inline (default):** texts at or under `GENERATION_INLINE_MAX_CHARS`
+  (default 5000 — i.e. everything) generate synchronously in the request, as
+  before. No worker required.
+- **Queued:** lower the threshold once a worker is deployed and longer texts
+  return immediately; the result page polls until the audio lands, and API
+  callers get a `202` with `poll_url` / `audio_url` instead of audio bytes.
+
+The queue is Postgres itself — the `Generation` row is the job, claimed with
+`FOR UPDATE SKIP LOCKED`, so any number of workers can run without contention
+and without adding Redis to the stack.
+
+```bash
+npm run worker
+```
+
+Deploy it as a second process/service sharing the web app's environment
+(Railway-style). Failed jobs retry with exponential backoff (30s → 60s → 120s,
+3 attempts); jobs orphaned by a crashed worker are requeued by a stale-claim
+reaper after 10 minutes, or failed honestly once their attempts are spent.
+Billing entitlement is checked at enqueue time, so a queued job never turns
+into a surprise charge gate, and usage is recorded only on completion.
+
+## Known limitations
 - **Rate limiting is per process.** Correct for a single instance; use a shared
   store behind multiple replicas.
-- **Generation is synchronous.** Long scripts are bounded by
-  `CHATTERBOX_TIMEOUT_MS`. A job queue would be the next step for longer work.

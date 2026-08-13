@@ -1,5 +1,7 @@
-import "server-only";
-
+// No `server-only` here: operational scripts (prisma/seed.ts, scripts/*)
+// construct adapters directly via ./factory under tsx, where that import
+// throws. Application code must go through `@/lib/storage` (the barrel),
+// which carries the guard.
 import {
   DeleteObjectCommand,
   GetObjectCommand,
